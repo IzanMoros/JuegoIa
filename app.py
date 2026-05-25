@@ -8,9 +8,41 @@ except ImportError:
 
 try:
     import google.generativeai as genai
+    from google.api_core import exceptions as google_exceptions
 except ImportError:
     st.error("Error: Librería 'google-generativeai' no instalada.")
 
+
+# ==========================================
+# HELPERS Y GESTIÓN DE BUFFER DE MEMORIA
+# ==========================================
+def apply_memory_buffer(messages, window_size):
+    """
+    Simula LangChain's ConversationBufferWindowMemory.
+    Retiene el system prompt (índice 0) y los últimos N * 2 mensajes (ida y vuelta del usuario + IA).
+    """
+    if not messages:
+        return []
+    system_msg = [messages[0]]
+    chat_history = messages[1:]
+    # Un "turno" son 2 mensajes: pregunta del user + respuesta de IA
+    limit = window_size * 2
+    
+    if len(chat_history) > limit:
+        chat_history = chat_history[-limit:]
+        
+    return system_msg + chat_history
+
+def estimate_context_size(messages, window_size):
+    """
+    Estima el número de caracteres y palabras que se enviarán en el búfer de contexto.
+    """
+    if not messages:
+        return 0, 0
+    buffer = apply_memory_buffer(messages, window_size)
+    total_chars = sum(len(msg["content"]) for msg in buffer)
+    total_words = sum(len(msg["content"].split()) for msg in buffer)
+    return total_chars, total_words
 
 # ==========================================
 # UI/UX STYLING (Tema Inmersivo Oscuro)
@@ -58,6 +90,15 @@ st.markdown("<p style='text-align:center;'><em>Una aventura de texto gobernada p
 with st.sidebar:
     st.header("⚙️ Grimorio del DM")
     proveedor = st.selectbox("Motor LLM (El cerebro del DM):", ["Google Gemini (Recomendado)", "OpenAI", "Groq"])
+    
+    model_gemini = "gemini-1.5-flash"
+    if proveedor == "Google Gemini (Recomendado)":
+        model_gemini = st.selectbox(
+            "Modelo Gemini:",
+            ["gemini-1.5-flash", "gemini-1.5-pro"],
+            help="gemini-1.5-flash: Rápido y con límites gratuitos muy amplios (recomendado para evitar el error 429). gemini-1.5-pro: Más inteligente pero con límites muy estrictos."
+        )
+        
     # IMPORTANTE: Nunca subas a GitHub tu clave real. Pégala aquí solo temporalmente o usa st.secrets.
     api_key = st.text_input("Ingresa tu API Key (No se guarda):", value="TU_API_KEY_AQUI", type="password")
     
@@ -69,8 +110,37 @@ with st.sidebar:
     st.markdown("""
     **¿Qué es el Memory Buffer?**
     La IA normalmente "no tiene memoria". Pierde el contexto tras cada mensaje. 
-    Aquí aplicamos un *ConversationBufferWindowMemory*: Recortamos el historial a los últimos X mensajes para evitar saturar el límite de *Tokens* y lo inyectamos junto al System Prompt cada vez que hablas.
+    Aquí aplicamos un *ConversationBufferWindowMemory*: Recortamos el historial a los últimos X turnos para evitar saturar el límite de *Tokens*.
     """)
+    
+    # Indicador dinámico de memoria
+    st.markdown("---")
+    st.subheader("📊 Consumo de Memoria")
+    if "messages" in st.session_state:
+        buffer_actual = apply_memory_buffer(st.session_state.messages, memoria_turns)
+        total_chars, total_words = estimate_context_size(st.session_state.messages, memoria_turns)
+        
+        if total_chars < 3000:
+            color = "#2ecc71"
+            estado = "🟢 Seguro (Bajo consumo de tokens)"
+        elif total_chars < 7000:
+            color = "#f1c40f"
+            estado = "🟡 Moderado (Riesgo bajo de 429)"
+        else:
+            color = "#e74c3c"
+            estado = "🔴 Alto (Riesgo de error 429 en plan gratuito)"
+            
+        st.markdown(f"""
+        * **Mensajes en memoria:** {max(0, len(buffer_actual) - 1)} (más prompt)
+        * **Caracteres estimados:** `{total_chars}`
+        * **Palabras estimadas:** `{total_words}`
+        
+        <div style="background-color: #161520; padding: 10px; border-radius: 5px; border-left: 5px solid {color}; margin-top: 5px; border: 1px solid #3b3127;">
+            <span style="color: {color}; font-weight: bold; font-size: 0.9em;">{estado}</span>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.markdown("---")
     if st.button("🔄 Reiniciar Aventura"):
         st.session_state.messages = []
         st.rerun()
@@ -90,22 +160,7 @@ REGLA 4: El usuario empieza en las Puertas de la Cripta de Hierro. Ofrece una en
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-def apply_memory_buffer(messages, window_size):
-    """
-    Simula LangChain's ConversationBufferWindowMemory.
-    Retiene el system prompt (índice 0) y los últimos N * 2 mensajes (ida y vuelta del usuario + IA).
-    """
-    system_msg = [messages[0]]
-    chat_history = messages[1:]
-    # Un "turno" son 2 mensajes: pregunta del user + respuesta de IA
-    limit = window_size * 2
-    
-    if len(chat_history) > limit:
-        chat_history = chat_history[-limit:]
-        
-    return system_msg + chat_history
-
-def call_llm(context_messages, apiKey, prov):
+def call_llm(context_messages, apiKey, prov, gemini_model="gemini-1.5-flash"):
     if "Groq" in prov or "OpenAI" in prov:
         base_url = "https://api.groq.com/openai/v1" if "Groq" in prov else None
         model_name = "llama3-8b-8192" if "Groq" in prov else "gpt-3.5-turbo"
@@ -128,23 +183,35 @@ def call_llm(context_messages, apiKey, prov):
              
         try:
             model = genai.GenerativeModel(
-                 'gemini-flash-latest',
+                 gemini_model,
                  system_instruction=SYSTEM_PROMPT
             )
             response = model.generate_content(
                 gemini_messages,
                 generation_config=genai.types.GenerationConfig(temperature=0.85)
             )
-        except Exception:
-            model = genai.GenerativeModel(
-                 'gemini-pro-latest',
-                 system_instruction=SYSTEM_PROMPT
-            )
-            response = model.generate_content(
-                gemini_messages,
-                generation_config=genai.types.GenerationConfig(temperature=0.85)
-            )
-        return response.text
+            return response.text
+        except Exception as e:
+            # Capturar errores 429 para que no haga fallback inútil y confunda al usuario
+            err_str = str(e).lower()
+            if "resourceexhausted" in err_str or "429" in err_str or "quota" in err_str:
+                raise e
+                
+            # Si es otro error (por ejemplo, modelo no disponible), intentamos fallback al otro modelo 1.5
+            fallback_model = "gemini-1.5-pro" if gemini_model == "gemini-1.5-flash" else "gemini-1.5-flash"
+            try:
+                model = genai.GenerativeModel(
+                     fallback_model,
+                     system_instruction=SYSTEM_PROMPT
+                )
+                response = model.generate_content(
+                    gemini_messages,
+                    generation_config=genai.types.GenerationConfig(temperature=0.85)
+                )
+                return response.text
+            except Exception:
+                # Si el fallback también falla, lanzar el error original
+                raise e
 
 # ==========================================
 # RENDERIZADO DEL CHAT EN PANTALLA
@@ -182,11 +249,43 @@ if prompt := st.chat_input("Escribe tu próxima acción o conjuro (ej: Ataco al 
                     # Aplicamos el Buffer Window Memory para mandar al LLM (Reto 100% conseguido)
                     context_optimizado = apply_memory_buffer(st.session_state.messages, memoria_turns)
                     
-                    # Llamada
-                    respuesta = call_llm(context_optimizado, api_key, proveedor)
+                    # Llamada pasándole el modelo de Gemini seleccionado
+                    respuesta = call_llm(context_optimizado, api_key, proveedor, model_gemini)
                     st.markdown(respuesta)
                     
                     # Archivar respuesta
                     st.session_state.messages.append({"role": "assistant", "content": respuesta})
                 except Exception as e:
-                    st.error(f"Se ha roto una cuerda del telar del tiempo: {e}")
+                    # Detectar si es un error 429 (Resource Exhausted / Rate Limit / Too Many Requests)
+                    err_str = str(e).lower()
+                    is_rate_limit = False
+                    
+                    if "resourceexhausted" in err_str or "429" in err_str or "quota" in err_str or "rate limit" in err_str:
+                        is_rate_limit = True
+                    
+                    if is_rate_limit:
+                        st.markdown(f"""
+                        <div style="background-color: #1e1315; border: 2px solid #8b0000; border-radius: 8px; padding: 20px; color: #f2dede; margin-top: 10px; border-left: 5px solid #ff4d4d; font-family: 'Georgia', serif;">
+                            <h3 style="color: #ff4d4d; margin-top: 0; font-family: 'Courier New', monospace; text-shadow: 1px 1px 2px #000; font-size: 1.3em;">
+                                🛑 EL DUNGEON MASTER ESTÁ AGOTADO (Error 429 / Cuota Excedida)
+                            </h3>
+                            <p style="font-size: 1.05em; line-height: 1.5; margin-bottom: 15px;">
+                                <em>"La energía arcana del portal se ha distorsionado. El Dungeon Master ha narrado demasiados universos seguidos y necesita un breve descanso para recuperar su maná y consultar sus pergaminos."</em>
+                            </p>
+                            <hr style="border: 0; border-top: 1px solid #5a1a1a; margin: 15px 0;">
+                            <h4 style="color: #e6b333; margin-bottom: 8px; font-family: 'Courier New', monospace;">🔮 ¿Por qué ha ocurrido esto en tu plan gratuito?</h4>
+                            <ul style="margin-left: 20px; padding-left: 0; line-height: 1.5; font-size: 0.95em;">
+                                <li><b>Límite de Consultas por Minuto/Día:</b> Has realizado demasiadas acciones seguidas o has alcanzado el tope diario del plan gratuito de Google Gemini.</li>
+                                <li><b>Saturación del Búfer de Memoria:</b> El historial actual es muy extenso. Al enviar muchos mensajes pasados a la vez, se consumen rápidamente los tokens de entrada permitidos por Google.</li>
+                            </ul>
+                            <h4 style="color: #e6b333; margin-top: 15px; margin-bottom: 8px; font-family: 'Courier New', monospace;">🛡️ ¿Cómo puedes solucionarlo ahora mismo?</h4>
+                            <ol style="margin-left: 20px; padding-left: 0; line-height: 1.5; font-size: 0.95em;">
+                                <li><b>Reduce la memoria en el panel izquierdo:</b> Mueve el control deslizante de <i>"Tamaño del Buffer (Turnos recordados)"</i> a <b>1 o 2</b> para consumir menos recursos arcanos (tokens).</li>
+                                <li><b>Cambia el modelo a Gemini 1.5 Flash:</b> Si estabas usando <i>gemini-1.5-pro</i>, cámbialo a <b>gemini-1.5-flash</b> en la barra lateral; es mucho más rápido y tiene límites de cuota significativamente más altos.</li>
+                                <li><b>Espera un momento:</b> Los límites por minuto se restablecen solos. Espera <b>30-60 segundos</b> y realiza tu próxima acción.</li>
+                                <li><b>Usa un proveedor alternativo:</b> Si tienes una clave de <b>Groq</b> (también gratis), puedes cambiar de motor en el menú izquierdo para continuar tu partida sin pausas.</li>
+                            </ol>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.error(f"Se ha roto una cuerda del telar del tiempo: {e}")
