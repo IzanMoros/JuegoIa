@@ -91,12 +91,12 @@ with st.sidebar:
     st.header("⚙️ Grimorio del DM")
     proveedor = st.selectbox("Motor LLM (El cerebro del DM):", ["Google Gemini (Recomendado)", "OpenAI", "Groq"])
     
-    model_gemini = "gemini-1.5-flash"
+    model_gemini = "gemini-2.5-flash"
     if proveedor == "Google Gemini (Recomendado)":
         model_gemini = st.selectbox(
             "Modelo Gemini:",
-            ["gemini-1.5-flash", "gemini-1.5-pro"],
-            help="gemini-1.5-flash: Rápido y con límites gratuitos muy amplios (recomendado para evitar el error 429). gemini-1.5-pro: Más inteligente pero con límites muy estrictos."
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3.1-pro"],
+            help="gemini-2.5-flash / gemini-3.5-flash: Rápido y con límites gratuitos más amplios (recomendado para evitar el error 429). gemini-2.5-pro / gemini-3.1-pro: Más inteligente pero con límites muy estrictos."
         )
         
     # IMPORTANTE: Nunca subas a GitHub tu clave real. Pégala aquí solo temporalmente o usa st.secrets.
@@ -160,7 +160,7 @@ REGLA 4: El usuario empieza en las Puertas de la Cripta de Hierro. Ofrece una en
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-def call_llm(context_messages, apiKey, prov, gemini_model="gemini-1.5-flash"):
+def call_llm(context_messages, apiKey, prov, gemini_model="gemini-2.5-flash"):
     if "Groq" in prov or "OpenAI" in prov:
         base_url = "https://api.groq.com/openai/v1" if "Groq" in prov else None
         model_name = "llama3-8b-8192" if "Groq" in prov else "gpt-3.5-turbo"
@@ -197,8 +197,8 @@ def call_llm(context_messages, apiKey, prov, gemini_model="gemini-1.5-flash"):
             if "resourceexhausted" in err_str or "429" in err_str or "quota" in err_str:
                 raise e
                 
-            # Si es otro error (por ejemplo, modelo no disponible), intentamos fallback al otro modelo 1.5
-            fallback_model = "gemini-1.5-pro" if gemini_model == "gemini-1.5-flash" else "gemini-1.5-flash"
+            # Si es otro error (por ejemplo, modelo no disponible), intentamos fallback
+            fallback_model = "gemini-3.5-flash" if gemini_model == "gemini-2.5-flash" else "gemini-2.5-flash"
             try:
                 model = genai.GenerativeModel(
                      fallback_model,
@@ -281,7 +281,7 @@ if prompt := st.chat_input("Escribe tu próxima acción o conjuro (ej: Ataco al 
                             <h4 style="color: #e6b333; margin-top: 15px; margin-bottom: 8px; font-family: 'Courier New', monospace;">🛡️ ¿Cómo puedes solucionarlo ahora mismo?</h4>
                             <ol style="margin-left: 20px; padding-left: 0; line-height: 1.5; font-size: 0.95em;">
                                 <li><b>Reduce la memoria en el panel izquierdo:</b> Mueve el control deslizante de <i>"Tamaño del Buffer (Turnos recordados)"</i> a <b>1 o 2</b> para consumir menos recursos arcanos (tokens).</li>
-                                <li><b>Cambia el modelo a Gemini 1.5 Flash:</b> Si estabas usando <i>gemini-1.5-pro</i>, cámbialo a <b>gemini-1.5-flash</b> en la barra lateral; es mucho más rápido y tiene límites de cuota significativamente más altos.</li>
+                                <li><b>Cambia el modelo a Gemini 2.5 Flash:</b> Si estabas usando <i>gemini-2.5-pro</i> o <i>gemini-3.1-pro</i>, cámbialo a <b>gemini-2.5-flash</b> en la barra lateral; es mucho más rápido y tiene límites de cuota significativamente más altos.</li>
                                 <li><b>Espera un momento:</b> Los límites por minuto se restablecen solos. Espera <b>30-60 segundos</b> y realiza tu próxima acción.</li>
                                 <li><b>Usa un proveedor alternativo:</b> Si tienes una clave de <b>Groq</b> (también gratis), puedes cambiar de motor en el menú izquierdo para continuar tu partida sin pausas.</li>
                             </ol>
