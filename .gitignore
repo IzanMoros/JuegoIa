@@ -1,0 +1,6 @@
+# Archivos locales que NO deben subirse a GitHub
+generate_pdf.py
+*.pdf
+__pycache__/
+*.pyc
+.env
