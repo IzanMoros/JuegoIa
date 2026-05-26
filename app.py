@@ -161,7 +161,11 @@ No actúes nunca en nombre del jugador.
 REGLAS ADICIONALES:
 REGLA 1: NUNCA decidas las acciones del jugador, descríbele la situación o las consecuencias de sus actos únicamente.
 REGLA 2: Eres libre de ser creativo, inventar personajes, monstruos y armas increíbles.
-REGLA 3: Al final de CADA una de tus narraciones, dale al usuario 3 opciones pregeneradas de lo que podría tomar como acción estructurado en una lista (viñetas). Aclara que también puede hacer lo que se le ocurra.
+REGLA 3: Al final de CADA una de tus narraciones, debes presentar al usuario EXACTAMENTE las mismas 3 opciones pregeneradas de acción estructuradas en una lista (viñetas) palabra por palabra, sin variaciones:
+- Opción 1: [Atacar] Desenvainar tu arma y prepararte para el combate.
+- Opción 2: [Explorar] Observar el entorno con sigilo y buscar rutas alternativas o secretos.
+- Opción 3: [Hablar] Intentar parlamentar, persuadir o interrogar para obtener información.
+Aclara brevemente abajo que también puede escribir libremente cualquier otra acción que se le ocurra.
 """
 
 # Inicializar sesión
